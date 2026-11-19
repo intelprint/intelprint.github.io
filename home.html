@@ -1804,6 +1804,20 @@ input, select, textarea {
   }
 
   .realm-tools[hidden], .favorites-dialog p[hidden] { display: none; }
+  .realm-tools span {
+    max-width: 42vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .realm-tools a[hidden] { display: none; }
+  .realm-tools a {
+    display: inline-grid;
+    min-height: 2.75rem;
+    align-items: center;
+    padding: 0 0.75rem;
+    border: 1px solid var(--realm-line);
+    border-radius: 4px;
+  }
   .realm-tools select { width: auto; max-width: 55vw; }
   .realm-tools button, .favorites-actions button {
     font-size: 0.8rem;
@@ -2180,12 +2194,13 @@ input, select, textarea {
       <div class="realm-cards"></div>
       <h2 id="realmTitle" class="realm-title"></h2>
       <div class="realm-tools" id="share-tools" hidden>
-        <span>연구회 모음</span>
+        <span id="shared-collection">연구회 모음</span>
         <label for="topic-filter" class="sr-only">공유 앱 주제</label>
         <select id="topic-filter"><option value="">모든 주제</option></select>
       </div>
       <div class="realm-tools" id="workbench-tools" hidden>
         <button type="button" id="edit-favorites">즐겨찾기 편집</button>
+        <a id="manage-shared" href="#" target="_blank" rel="noopener" hidden>공유 앱 분류 관리</a>
       </div>
       <button type="button" class="realm-close" aria-label="닫기">닫기</button>
       <div class="realm-empty" id="catalog-status" role="status">목록을 불러오는 중…</div><p class="realm-empty" hidden>아직 비어 있어요</p>
@@ -2205,7 +2220,7 @@ input, select, textarea {
     </dialog>
 
     <script>
-      window.__INTELPRINT__ = {"staticHome":true,"embed":true,"branches":[{"key":"study","label":"공유 앱","apps":[]}]};
+      window.__INTELPRINT__ = {"staticHome":true,"embed":true,"manageUrl":"https://accounts.google.com/AccountChooser?continue=https%3A%2F%2Fscript.google.com%2Fmacros%2Fs%2FAKfycbx_haTUGNGgxiPiy0oeZ9jGy35garCkPNxFX8j1PYFYdc8IkYNmT3RO5LDBsWGmfQvP%2Fexec%3Fview%3Dcategories","branches":[{"key":"study","label":"공유 앱","apps":[]}]};
     </script>
     <script>
 /*
@@ -3524,9 +3539,19 @@ void main() {
     var captionHint = caption.querySelector('.hint');
     var smallScreen = window.matchMedia && window.matchMedia('(hover: none), (max-width: 736px)').matches;
     var shareTools = document.getElementById('share-tools');
+    var collectionTitle = document.getElementById('shared-collection');
     var workbenchTools = document.getElementById('workbench-tools');
     var topicFilter = document.getElementById('topic-filter');
     var editFavorites = document.getElementById('edit-favorites');
+    var manageShared = document.getElementById('manage-shared');
+    var unclassified = '\u0000';
+    if (DATA.manageUrl) {
+      manageShared.href = DATA.manageUrl;
+      manageShared.hidden = false;
+      manageShared.addEventListener('click', function () {
+        window.dispatchEvent(new Event('intelprint:manage-shared'));
+      });
+    }
     var favoritesDialog = document.getElementById('favorites-dialog');
     var favoritesForm = document.getElementById('favorites-form');
     var favoritesList = document.getElementById('favorites-list');
@@ -3569,12 +3594,19 @@ void main() {
       workbenchTools.hidden = view.branch.key !== 'use';
       var apps = view.branch.apps;
       if (!shareTools.hidden) {
+        collectionTitle.textContent = view.branch.collection || '연구회 모음';
         var currentTopic = topicFilter.value;
-        var topics = Array.from(new Set(apps.flatMap(function (app) { return app.topics || []; })));
-        topicFilter.replaceChildren(new Option('모든 주제', ''));
+        var topics = view.branch.topics || Array.from(new Set(apps.flatMap(function (app) { return app.topics || []; })));
+        topicFilter.replaceChildren(new Option('모든 분류', ''));
         topics.forEach(function (topic) { topicFilter.add(new Option(topic, topic)); });
-        if (topics.indexOf(currentTopic) >= 0) topicFilter.value = currentTopic;
-        if (topicFilter.value) {
+        if (apps.some(function (app) { return !app.topics || !app.topics.length; })) {
+          topicFilter.add(new Option('미분류', unclassified));
+        }
+        topicFilter.value = currentTopic;
+        if (topicFilter.selectedIndex < 0) topicFilter.selectedIndex = 0;
+        if (topicFilter.value === unclassified) {
+          apps = apps.filter(function (app) { return !app.topics || !app.topics.length; });
+        } else if (topicFilter.value) {
           apps = apps.filter(function (app) { return (app.topics || []).indexOf(topicFilter.value) >= 0; });
         }
       } else if (!workbenchTools.hidden) {
@@ -3784,7 +3816,7 @@ void main() {
       setCaption(-1);
       if (view.floor) view.floor.setActive(-1);
       emptyEl.hidden = view.apps.length > 0 || (DATA.staticHome && !window.catalogLoaded);
-      emptyEl.textContent = topicFilter.value ? '이 주제에는 공유된 앱이 없어요' : '아직 비어 있어요';
+      emptyEl.textContent = topicFilter.value ? '이 분류에는 공유된 앱이 없어요' : '아직 비어 있어요';
       if (view.mode === 'a') {
         view.floor.setApps(view.apps.length);
         buildTiles();
