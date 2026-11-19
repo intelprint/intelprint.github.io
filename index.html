@@ -164,6 +164,7 @@
     <dialog id="helpDialog" aria-labelledby="helpTitle" style="max-width:min(26rem,80vw);font:1rem/1.6 system-ui;border-radius:12px">
       <h3 id="helpTitle">앱 열기 도움말</h3>
       <p>개인용 목록이 보이지 않으면 첫 화면의 ‘내 계정으로 열기’에서 소유자 계정을 선택하세요. 타일을 눌렀는데 앱이 보이지 않으면 ↗로 새 탭에서 열 수 있어요.</p>
+      <button type="button" id="guestRetry" hidden>이 앱을 로그인 없이 다시 열기</button>
       <details><summary>Google에서 여러 계정 로그인 문제를 안내한 경우</summary>
         <p>Chrome에서 Ctrl+Shift+N(Mac은 ⌘+Shift+N)으로 시크릿 창을 열고 사용할 Google 계정 하나만 로그인한 뒤 앱 주소를 여세요. 기존 창의 YouTube 로그인은 유지됩니다.</p>
       </details>
@@ -197,16 +198,17 @@
           return false;
         }
 
-        function openApp(url, name, push) {
+        function openApp(url, name, push, guest) {
           if (appFrame) return;
           appFrame = document.createElement('iframe');
           appFrame.className = 'frame app-frame';
-          // Public in-place apps get an isolated cookie jar in supporting browsers.
-          if ('credentialless' in appFrame) appFrame.credentialless = true;
+          // Keep each app's normal session unless the visitor asks for an isolated retry.
+          if (guest) appFrame.credentialless = true;
           appFrame.title = name || '앱';
           appFrame.allow = 'clipboard-read; clipboard-write; microphone; camera; autoplay; fullscreen';
           appFrame.setAttribute('allowfullscreen', '');
           appFrame.src = url;
+          document.getElementById('guestRetry').hidden = guest === true || !('credentialless' in appFrame);
           document.body.appendChild(appFrame);
           newTab.href = url;
           bar.hidden = false;
@@ -219,6 +221,7 @@
           if (!appFrame) return;
           appFrame.remove(); // a new frame per app keeps the app's own pages out of this page's history
           appFrame = null;
+          document.getElementById('guestRetry').hidden = true;
           bar.hidden = true;
           hub.style.visibility = '';
           document.title = 'intelprint';
@@ -252,6 +255,13 @@
 
         hub.src = 'home.html';
         document.getElementById('help').onclick = function () { document.getElementById('helpDialog').showModal(); };
+        document.getElementById('guestRetry').onclick = function () {
+          if (!appFrame) return;
+          var url = appFrame.src, name = appFrame.title;
+          document.getElementById('helpDialog').close();
+          closeApp();
+          openApp(url, name, false, true);
+        };
         window.addEventListener('pageshow', function (event) { if (event.persisted) location.reload(); });
         back.addEventListener('click', function () {
           var pushed = history.state && history.state.intelprintApp;
