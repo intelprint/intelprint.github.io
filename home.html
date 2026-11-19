@@ -1790,6 +1790,66 @@ input, select, textarea {
     opacity: 1;
   }
 
+  .realm-tools {
+    position: absolute;
+    top: 5.1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    white-space: nowrap;
+    color: var(--realm-muted);
+    font-size: 0.8rem;
+  }
+
+  .realm-tools[hidden], .favorites-dialog p[hidden] { display: none; }
+  .realm-tools select { width: auto; max-width: 55vw; }
+  .realm-tools button, .favorites-actions button {
+    font-size: 0.8rem;
+    letter-spacing: 0;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .favorites-dialog {
+    width: min(26rem, calc(100% - 2rem));
+    padding: 1.5rem;
+    border: 1px solid var(--realm-line);
+    border-radius: 0.75rem;
+    color: var(--realm-ink);
+    background: #1a1721;
+    color-scheme: dark;
+  }
+  .favorites-dialog::backdrop { background: rgba(8, 7, 11, 0.76); }
+  .favorites-dialog h2 { margin-bottom: 0.6rem; letter-spacing: 0.1em; }
+  .favorites-dialog p { font-size: 0.88rem; margin-bottom: 1rem; }
+  .favorites-dialog form { margin: 0; }
+  .favorites-list { max-height: min(48vh, 20rem); overflow: auto; }
+  .favorites-list label {
+    display: flex;
+    align-items: center;
+    min-height: 2.5rem;
+    gap: 0.75rem;
+    margin: 0;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .favorites-list input[type="checkbox"] {
+    appearance: auto;
+    opacity: 1;
+    z-index: auto;
+    margin: 0;
+    height: 1rem;
+    accent-color: #b8a8ee;
+  }
+  .favorites-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+
   /* Same close button as Dimension's articles. */
   .realm-close {
     position: absolute;
@@ -2051,6 +2111,7 @@ input, select, textarea {
       font-size: 0.95rem;
       letter-spacing: 0.4rem;
     }
+    .realm-tools { top: 4.1rem; }
 
     .realm-close {
       top: 0.25rem;
@@ -2118,13 +2179,33 @@ input, select, textarea {
       <div class="realm-tiles"></div>
       <div class="realm-cards"></div>
       <h2 id="realmTitle" class="realm-title"></h2>
+      <div class="realm-tools" id="share-tools" hidden>
+        <span>연구회 모음</span>
+        <label for="topic-filter" class="sr-only">공유 앱 주제</label>
+        <select id="topic-filter"><option value="">모든 주제</option></select>
+      </div>
+      <div class="realm-tools" id="workbench-tools" hidden>
+        <button type="button" id="edit-favorites">즐겨찾기 편집</button>
+      </div>
       <button type="button" class="realm-close" aria-label="닫기">닫기</button>
       <div class="realm-empty" id="catalog-status" role="status">목록을 불러오는 중…</div><p class="realm-empty" hidden>아직 비어 있어요</p>
       <p class="realm-caption" aria-live="polite"><strong></strong><span class="desc"></span><span class="hint"></span></p>
     </section>
+    <dialog id="favorites-dialog" class="favorites-dialog" aria-labelledby="favorites-title">
+      <form method="dialog" id="favorites-form">
+        <h2 id="favorites-title">즐겨찾기</h2>
+        <p>선택한 앱이 이 브라우저의 내 작업대 맨 앞에 표시됩니다.</p>
+        <div id="favorites-list" class="favorites-list"></div>
+        <p id="favorites-error" role="status" hidden>즐겨찾기를 저장할 수 없어요. 브라우저의 사이트 저장 설정을 확인해주세요.</p>
+        <div class="favorites-actions">
+          <button value="cancel">취소</button>
+          <button value="save">저장</button>
+        </div>
+      </form>
+    </dialog>
 
     <script>
-      window.__INTELPRINT__ = {"staticHome":true,"embed":true,"branches":[{"key":"study","label":"연구회","apps":[]}]};
+      window.__INTELPRINT__ = {"staticHome":true,"embed":true,"branches":[{"key":"study","label":"공유 앱","apps":[]}]};
     </script>
     <script>
 /*
@@ -3442,6 +3523,20 @@ void main() {
     var captionDesc = caption.querySelector('.desc');
     var captionHint = caption.querySelector('.hint');
     var smallScreen = window.matchMedia && window.matchMedia('(hover: none), (max-width: 736px)').matches;
+    var shareTools = document.getElementById('share-tools');
+    var workbenchTools = document.getElementById('workbench-tools');
+    var topicFilter = document.getElementById('topic-filter');
+    var editFavorites = document.getElementById('edit-favorites');
+    var favoritesDialog = document.getElementById('favorites-dialog');
+    var favoritesForm = document.getElementById('favorites-form');
+    var favoritesList = document.getElementById('favorites-list');
+    var favoritesError = document.getElementById('favorites-error');
+    var favoritesKey = 'intelprint.favorites.v1';
+    var favorites = new Set();
+    try {
+      var savedFavorites = JSON.parse(localStorage.getItem(favoritesKey));
+      if (Array.isArray(savedFavorites)) favorites = new Set(savedFavorites);
+    } catch (err) {}
 
     var view = { branch: null, mode: LOOK, floor: null, apps: [], links: [], selected: -1, closing: 0, lastPointer: 'mouse', lastPulse: 0 };
 
@@ -3458,6 +3553,64 @@ void main() {
       for (var i = 0; i < DATA.branches.length; i += 1) if (DATA.branches[i].key === key) return DATA.branches[i];
       return null;
     }
+
+    function favoriteCandidates() {
+      var apps = new Map();
+      DATA.branches.forEach(function (branch) {
+        branch.apps.forEach(function (app) {
+          if (app.id && !apps.has(app.id)) apps.set(app.id, app);
+        });
+      });
+      return Array.from(apps.values());
+    }
+
+    function refreshBranch() {
+      shareTools.hidden = view.branch.key !== 'study' || (DATA.staticHome && !window.catalogLoaded);
+      workbenchTools.hidden = view.branch.key !== 'use';
+      var apps = view.branch.apps;
+      if (!shareTools.hidden) {
+        var currentTopic = topicFilter.value;
+        var topics = Array.from(new Set(apps.flatMap(function (app) { return app.topics || []; })));
+        topicFilter.replaceChildren(new Option('모든 주제', ''));
+        topics.forEach(function (topic) { topicFilter.add(new Option(topic, topic)); });
+        if (topics.indexOf(currentTopic) >= 0) topicFilter.value = currentTopic;
+        if (topicFilter.value) {
+          apps = apps.filter(function (app) { return (app.topics || []).indexOf(topicFilter.value) >= 0; });
+        }
+      } else if (!workbenchTools.hidden) {
+        var pinned = favoriteCandidates().filter(function (app) { return favorites.has(app.id); });
+        apps = pinned.concat(apps.filter(function (app) { return !favorites.has(app.id); }));
+      }
+      view.apps = apps.slice(0, 36);
+      if (body.classList.contains('is-realm')) renderApps();
+    }
+
+    topicFilter.addEventListener('change', refreshBranch);
+    editFavorites.addEventListener('click', function () {
+      favoritesError.hidden = true;
+      favoritesList.replaceChildren();
+      favoriteCandidates().forEach(function (app) {
+        var label = document.createElement('label');
+        var input = document.createElement('input');
+        input.type = 'checkbox';
+        input.name = 'favorite';
+        input.value = app.id;
+        input.checked = favorites.has(input.value);
+        label.append(input, app.name);
+        favoritesList.appendChild(label);
+      });
+      favoritesDialog.showModal();
+    });
+    favoritesForm.addEventListener('submit', function (event) {
+      if (event.submitter && event.submitter.value === 'cancel') return;
+      event.preventDefault();
+      var selection = new FormData(favoritesForm).getAll('favorite');
+      try { localStorage.setItem(favoritesKey, JSON.stringify(selection)); }
+      catch (err) { favoritesError.hidden = false; return; }
+      favorites = new Set(selection);
+      favoritesDialog.close();
+      refreshBranch();
+    });
 
     // ---------- First screen (Dimension) ----------
 
@@ -3494,10 +3647,9 @@ void main() {
         if (oldKeys !== branches.map(function (b) { return b.key; }).join(',')) renderNav();
         if (view.branch && !view.closing) {
           var current = findBranch(view.branch.key);
-          if (current && JSON.stringify(current.apps) !== JSON.stringify(view.apps)) {
+          if (current) {
             view.branch = current;
-            view.apps = current.apps.slice(0, 36);
-            if (body.classList.contains('is-realm')) { stopFloor(); startFloor(); }
+            refreshBranch();
           }
         }
       });
@@ -3577,7 +3729,8 @@ void main() {
       var branch = findBranch(key);
       if (!branch || view.branch) return;
       view.branch = branch;
-      view.apps = branch.apps.slice(0, 36);
+      topicFilter.value = '';
+      refreshBranch();
       if (push) history_.push(branch.key);
       titleEl.textContent = branch.label;
       setCaption(-1);
@@ -3594,6 +3747,7 @@ void main() {
 
     function closeBranch(push, after) {
       if (!view.branch || view.closing) return;
+      if (favoritesDialog.open) favoritesDialog.close();
       var key = view.branch.key;
       if (push) history_.push('');
       body.classList.remove('is-realm');
@@ -3622,8 +3776,16 @@ void main() {
       view.floor = window.createAcidSquares ? window.createAcidSquares(floorHost, props, { onFrame: mode === 'a' ? placeTiles : null }) : null;
       if (!view.floor) mode = 'c'; // no WebGL2: show the cards on the plain background
       view.mode = mode;
+      renderApps();
+    }
+
+    function renderApps() {
+      view.selected = -1;
+      setCaption(-1);
+      if (view.floor) view.floor.setActive(-1);
       emptyEl.hidden = view.apps.length > 0 || (DATA.staticHome && !window.catalogLoaded);
-      if (mode === 'a') {
+      emptyEl.textContent = topicFilter.value ? '이 주제에는 공유된 앱이 없어요' : '아직 비어 있어요';
+      if (view.mode === 'a') {
         view.floor.setApps(view.apps.length);
         buildTiles();
       } else {
@@ -3670,7 +3832,7 @@ void main() {
     });
 
     document.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape' && view.branch) closeBranch(true);
+      if (event.key === 'Escape' && view.branch && !favoritesDialog.open) closeBranch(true);
     });
 
     // Asks the intelprint.github.io page to open the app in place. The server marks which apps may (연구회 apps that

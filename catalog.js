@@ -21,7 +21,7 @@
       if (!owner) apply(branches);
     } catch {
       if (owner) return;
-      status.textContent = '연구회 목록을 가져오지 못했어요. ';
+      status.textContent = '공유 앱 목록을 가져오지 못했어요. ';
       const retry = document.createElement('button');
       retry.textContent = '다시 시도';
       retry.onclick = loadPublic;
