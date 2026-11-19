@@ -3,7 +3,7 @@
   intelprint public page (https://intelprint.github.io).
   Google shows a "created by an Apps Script user" banner on Apps Script web apps opened directly.
   Opened inside this page the banner does not appear, so the public hub and its apps are shown here:
-  - #hub: the public intelprint web app (연구회 only), with ?embed=1.
+  - #hub: the local landing page. It loads the public catalog without Google cookies.
   - When a tile is clicked, the hub sends {type: 'intelprint:open', url} and the app opens full screen on top.
     Only messages from inside #hub with an Apps Script web app link are accepted.
 -->
@@ -149,7 +149,6 @@
       id="hub"
       class="frame"
       title="intelprint"
-      src="https://script.google.com/macros/s/AKfycbwF95zPsAPKwgPGhu1Cirp8wb7sCPi5RLUPuv2IUBZFRdNLvwocFe0IAvF6M7eq0lri/exec?embed=1"
     ></iframe>
 
     <div id="bar" class="bar" hidden>
@@ -157,10 +156,19 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>목록
       </button>
       <span class="sep" aria-hidden="true"></span>
+      <button type="button" id="help">열기 도움말</button>
       <a id="newTab" href="#" target="_blank" rel="noopener" title="새 탭에서 열기" aria-label="새 탭에서 열기">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
       </a>
     </div>
+    <dialog id="helpDialog" aria-labelledby="helpTitle" style="max-width:min(26rem,80vw);font:1rem/1.6 system-ui;border-radius:12px">
+      <h3 id="helpTitle">앱 열기 도움말</h3>
+      <p>개인용 목록이 보이지 않으면 첫 화면의 ‘내 계정으로 열기’에서 소유자 계정을 선택하세요. 타일을 눌렀는데 앱이 보이지 않으면 ↗로 새 탭에서 열 수 있어요.</p>
+      <details><summary>Google에서 여러 계정 로그인 문제를 안내한 경우</summary>
+        <p>Chrome에서 Ctrl+Shift+N(Mac은 ⌘+Shift+N)으로 시크릿 창을 열고 사용할 Google 계정 하나만 로그인한 뒤 앱 주소를 여세요. 기존 창의 YouTube 로그인은 유지됩니다.</p>
+      </details>
+      <form method="dialog"><button>닫기</button></form>
+    </dialog>
 
     <script>
       (function () {
@@ -174,13 +182,15 @@
 
         // Apps Script web app links only (the same rule the hub's sheet uses, narrowed to Apps Script).
         var APP_URL = /^https:\/\/script\.google\.com\/(?:a\/macros\/[\w.-]+|macros)\/s\/[\w-]+\/exec(?:\?[^#\s"'<>]*)?$/;
-        var HUB_ORIGIN = /^https:\/\/[\w-]+\.googleusercontent\.com$/;
+        var GOOGLE_ORIGIN = /^https:\/\/[\w-]+-script\.googleusercontent\.com$/;
+        var sessionFrame;
 
         // True when the message came from the hub frame or a frame inside it (Apps Script nests its own frames).
-        function fromHub(source) {
+        function fromFrame(source, frame) {
+          if (!frame) return false;
           var w = source;
           for (var i = 0; w && i < 8; i += 1) {
-            if (w === hub.contentWindow) return true;
+            if (w === frame.contentWindow) return true;
             if (w === w.parent) return false;
             w = w.parent;
           }
@@ -191,6 +201,8 @@
           if (appFrame) return;
           appFrame = document.createElement('iframe');
           appFrame.className = 'frame app-frame';
+          // Public in-place apps get an isolated cookie jar in supporting browsers.
+          if ('credentialless' in appFrame) appFrame.credentialless = true;
           appFrame.title = name || '앱';
           appFrame.allow = 'clipboard-read; clipboard-write; microphone; camera; autoplay; fullscreen';
           appFrame.setAttribute('allowfullscreen', '');
@@ -214,11 +226,33 @@
 
         window.addEventListener('message', function (event) {
           var data = event.data;
-          if (!data || data.type !== 'intelprint:open' || typeof data.url !== 'string') return;
-          if (!HUB_ORIGIN.test(event.origin) || !fromHub(event.source) || !APP_URL.test(data.url)) return;
+          if (!data) return;
+          if (data.type === 'intelprint:session' && GOOGLE_ORIGIN.test(event.origin) && fromFrame(event.source, sessionFrame)) {
+            if (data.owner === true && Array.isArray(data.branches)) {
+              hub.contentWindow.postMessage({type: 'intelprint:owner', branches: data.branches}, location.origin);
+            }
+            sessionFrame.remove();
+            sessionFrame = null;
+            return;
+          }
+          if (event.origin !== location.origin || event.source !== hub.contentWindow) return;
+          if (data.type === 'intelprint:help') { document.getElementById('helpDialog').showModal(); return; }
+          if (data.type === 'intelprint:home-ready') {
+            if (sessionFrame) sessionFrame.remove();
+            sessionFrame = document.createElement('iframe');
+            sessionFrame.hidden = true;
+            sessionFrame.title = '계정 확인';
+            sessionFrame.src = 'https://script.google.com/macros/s/AKfycbwF95zPsAPKwgPGhu1Cirp8wb7sCPi5RLUPuv2IUBZFRdNLvwocFe0IAvF6M7eq0lri/exec?view=session';
+            document.body.appendChild(sessionFrame);
+            return;
+          }
+          if (data.type !== 'intelprint:open' || typeof data.url !== 'string' || !APP_URL.test(data.url)) return;
           openApp(data.url, typeof data.name === 'string' ? data.name.slice(0, 60) : '', true);
         });
 
+        hub.src = 'home.html';
+        document.getElementById('help').onclick = function () { document.getElementById('helpDialog').showModal(); };
+        window.addEventListener('pageshow', function (event) { if (event.persisted) location.reload(); });
         back.addEventListener('click', function () {
           var pushed = history.state && history.state.intelprintApp;
           closeApp();
